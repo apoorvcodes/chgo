@@ -15,3 +15,9 @@ type Course struct {
 	Lessons  string
 	Source   string
 }
+
+type Lesson struct {
+	ID    string
+	Title string
+	File  string
+}

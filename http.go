@@ -1,7 +1,9 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
+	"io/ioutil"
 	"net/http"
 	"net/url"
 	"strings"
@@ -53,6 +55,8 @@ func login(email, password string) (Config, error) {
 	return config, nil
 }
 
+// prepareRequest prepares request with useful defaults
+// like cookies, headers
 func prepareRequest(endpoint string) (*http.Request, error) {
 	req, err := http.NewRequest("GET", endpoint, nil)
 	if err != nil {
@@ -74,9 +78,13 @@ func prepareRequest(endpoint string) (*http.Request, error) {
 		Value: config.Locale,
 	})
 
+	token := fmt.Sprintf("Bearer %s", config.AccessToken)
+	req.Header.Add("Authorization", token)
+
 	return req, nil
 }
 
+// searchCourses searches for courses given a search term
 func searchCourses(title string) ([]Course, error) {
 	var client http.Client
 
@@ -98,4 +106,58 @@ func searchCourses(title string) ([]Course, error) {
 	}
 
 	return courses, nil
+}
+
+// getCourseID gives back the courseID given a valid course URL
+func getCourseID(url string) (string, error) {
+	client := http.Client{}
+
+	req, err := prepareRequest(url)
+	if err != nil {
+		return "", err
+	}
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	courseID, err := extractCourseID(resp.Body)
+	if err != nil {
+		return "", err
+	}
+
+	return courseID, nil
+}
+
+// getLessons fetches the lessons for the given course
+func getLessons(url string) ([]Lesson, error) {
+	client := http.Client{}
+
+	courseID, err := getCourseID(url)
+	if err != nil {
+		return nil, err
+	}
+
+	endpoint := fmt.Sprintf("%s/course/%s/lessons", baseURL, courseID)
+	req, err := prepareRequest(endpoint)
+	if err != nil {
+		return nil, err
+	}
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	data, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+
+	var lessons []Lesson
+	err = json.Unmarshal(data, &lessons)
+	return lessons, err
 }

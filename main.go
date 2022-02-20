@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/charmbracelet/bubbles/list"
 	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
@@ -12,8 +13,10 @@ import (
 )
 
 var (
-	config  Config
-	baseURL = "https://coursehunter.net"
+	config        Config
+	baseURL       = "https://coursehunter.net"
+	lessonsWidth  = 30
+	lessonsHeight = 23
 )
 
 type Loading struct {
@@ -23,15 +26,20 @@ type Loading struct {
 }
 
 type model struct {
-	activeIdx   int
-	courses     []Course
-	searchInput textinput.Model
-	focussedIdx int
-	loading     Loading
-	err         error
+	courses         []Course
+	lessons         []Lesson
+	searchInput     textinput.Model
+	lessonsList     list.Model
+	loading         Loading
+	err             error
+	focussedIdx     int
+	activeCourseIdx int
+	activeLessonIdx int
+	screenIdx       int
 }
 
 type coursesMsg []Course
+type lessonsMsg []Lesson
 type errMsg error
 
 func fetchCourses(url string) tea.Cmd {
@@ -42,6 +50,17 @@ func fetchCourses(url string) tea.Cmd {
 		}
 
 		return coursesMsg(courses)
+	}
+}
+
+func fetchLessons(url string) tea.Cmd {
+	return func() tea.Msg {
+		lessons, err := getLessons(url)
+		if err != nil {
+			return errMsg(err)
+		}
+
+		return lessonsMsg(lessons)
 	}
 }
 
@@ -56,6 +75,10 @@ func (m model) View() string {
 		return appStyle.Render(m.loadingView())
 	}
 
+	if m.screenIdx == 1 {
+		return appStyle.Render(m.lessonsList.View())
+	}
+
 	list := m.coursesView()
 	return appStyle.Render(m.searchInput.View() + list + m.courseView())
 }
@@ -67,25 +90,40 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "ctrl+c":
 			return m, tea.Quit
 		case "k", "up":
-			if m.activeIdx == 0 {
-				m.activeIdx = len(m.courses) - 1
+			if m.activeCourseIdx == 0 {
+				m.activeCourseIdx = len(m.courses) - 1
 			} else {
-				m.activeIdx--
+				m.activeCourseIdx--
 			}
 		case "j", "down":
-			if m.activeIdx == len(m.courses)-1 {
-				m.activeIdx = 0
+			if m.activeCourseIdx == len(m.courses)-1 {
+				m.activeCourseIdx = 0
 			} else {
-				m.activeIdx++
+				m.activeCourseIdx++
 			}
+		case "P":
+			m.screenIdx = 0
 		case "enter":
-			if m.focussedIdx == 0 {
+			currIdx := m.activeCourseIdx
+			m.activeCourseIdx = 0
+			m.loading.status = true
+
+			if m.focussedIdx == 0 && m.screenIdx == 0 {
 				m.loading.text = "searching for course: " + m.searchInput.Value()
-				m.loading.status = true
-				m.activeIdx = 0
 				return m, fetchCourses(m.searchInput.Value())
 			}
+
+			if m.focussedIdx == 1 && m.screenIdx == 0 {
+				course := m.courses[currIdx]
+				m.loading.text = "fetching lessons for: " + course.Title
+				return m, fetchLessons(course.URL)
+			}
+
 		case "tab":
+			if m.screenIdx != 0 {
+				return m, nil
+			}
+
 			next := m.focussedIdx + 1
 
 			if m.focussedIdx == 0 {
@@ -104,14 +142,30 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.loading.status = false
 		m.courses = msg
 
+	case lessonsMsg:
+		m.loading.status = false
+		m.lessons = msg
+
+		var items []list.Item
+		for _, lesson := range msg {
+			items = append(items, lessonItem(lesson.Title))
+		}
+
+		m.lessonsList.SetItems(items)
+		m.screenIdx = 1
+
 	case errMsg:
 		m.loading.status = false
 		return m, tea.Quit
 	}
 
 	var cmd tea.Cmd
-	m.searchInput, cmd = m.searchInput.Update(msg)
 	m.loading.spinner, cmd = m.loading.spinner.Update(msg)
+	m.searchInput, cmd = m.searchInput.Update(msg)
+
+	if m.screenIdx == 1 {
+		m.lessonsList, cmd = m.lessonsList.Update(msg)
+	}
 
 	return m, cmd
 }
@@ -123,10 +177,18 @@ func NewModel() tea.Model {
 
 	s := spinner.New()
 	s.Spinner = spinner.Dot
-	s.Style = lipgloss.NewStyle().Foreground(lipgloss.Color("205"))
+	s.Style = lipgloss.NewStyle().Foreground(accentColor)
+
+	l := list.New([]list.Item{}, lessonItemDelegate{}, lessonsWidth, lessonsHeight)
+	l.Title = "Lessons"
+	l.Styles.Title = headerStyle
+	l.SetFilteringEnabled(false)
+	l.SetShowStatusBar(false)
+	l.SetShowHelp(false)
 
 	return model{
 		searchInput: i,
+		lessonsList: l,
 		loading: Loading{
 			status:  false,
 			text:    "",

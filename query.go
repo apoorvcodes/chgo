@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"io"
 	"strings"
 
@@ -38,7 +39,9 @@ func ExtractCourses(r io.Reader) ([]Course, error) {
 
 	doc.Find("article.course").Each(func(i int, s *goquery.Selection) {
 		url, _ := s.Find("a.course-btn").Attr("href")
+
 		title := s.Find("h3").Text()
+		title = strings.TrimSpace(title)
 
 		duration := s.Find(".course-duration").Text()
 		duration = strings.TrimSpace(duration)
@@ -60,4 +63,18 @@ func ExtractCourses(r io.Reader) ([]Course, error) {
 	})
 
 	return courses, nil
+}
+
+func extractCourseID(r io.Reader) (string, error) {
+	doc, err := goquery.NewDocumentFromReader(r)
+	if err != nil {
+		return "", nil
+	}
+
+	courseID, ok := doc.Find("button.course-action").Attr("data-course-id")
+	if !ok {
+		return "", fmt.Errorf("failed to extract course id")
+	}
+
+	return courseID, err
 }

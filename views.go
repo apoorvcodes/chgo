@@ -2,20 +2,73 @@ package main
 
 import (
 	"fmt"
+	"io"
 
+	"github.com/charmbracelet/bubbles/list"
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 )
+
+var (
+	/* colors */
+	accentColor = lipgloss.Color("#E0AF68")
+	whiteColor  = lipgloss.Color("#FFFFFF")
+	pinkColor   = lipgloss.Color("#313552")
+
+	/* styles */
+	itemStyle         = lipgloss.NewStyle().PaddingLeft(2)
+	selectedItemStyle = lipgloss.NewStyle().PaddingLeft(2).Foreground(accentColor)
+	headerStyle       = lipgloss.NewStyle().Background(pinkColor).Foreground(whiteColor).Padding(0, 1)
+)
+
+/* === lessonsView */
+type lessonItem string
+
+func (i lessonItem) FilterValue() string { return "" }
+
+type lessonItemDelegate struct{}
+
+func (d lessonItemDelegate) Height() int { return 1 }
+
+func (d lessonItemDelegate) Spacing() int { return 0 }
+
+func (d lessonItemDelegate) Update(msg tea.Msg, m *list.Model) tea.Cmd { return nil }
+
+func (d lessonItemDelegate) Render(w io.Writer, m list.Model, index int, listItem list.Item) {
+	i, ok := listItem.(lessonItem)
+	if !ok {
+		return
+	}
+
+	str := fmt.Sprintf("%s", i)
+
+	fn := itemStyle.Render
+	if index == m.Index() {
+		fn = func(s string) string {
+			return selectedItemStyle.Render("> " + s)
+		}
+	}
+
+	fmt.Fprintf(w, fn(str))
+}
+
+/* === lessonsView */
 
 func (m model) loadingView() string {
 	return m.loading.spinner.View() + m.loading.text
 }
 
 func (m model) coursesView() string {
-	var list string
+	if len(m.courses) == 0 {
+		return ""
+	}
+
+	list := headerStyle.Render("Search results")
+	list += "\n\n"
 
 	for i, course := range m.courses {
 		cursor := " "
-		if m.focussedIdx == 1 && m.activeIdx == i {
+		if m.focussedIdx == 1 && m.activeCourseIdx == i {
 			cursor = ">"
 		}
 
@@ -30,9 +83,11 @@ func (m model) courseView() string {
 		return ""
 	}
 
-	course := m.courses[m.activeIdx]
+	course := m.courses[m.activeCourseIdx]
 
-	view := fmt.Sprintf("  Title:    %s\n", course.Title)
+	view := headerStyle.Render("Selected course")
+	view += "\n\n"
+	view += fmt.Sprintf("  Title:    %s\n", course.Title)
 	view += fmt.Sprintf("  Source:   %s\n", course.Source)
 	view += fmt.Sprintf("  Language: %s\n", course.Language)
 
