@@ -1,4 +1,4 @@
-package types
+package main
 
 type Config struct {
 	AccessToken string `yaml:"accessToken"`

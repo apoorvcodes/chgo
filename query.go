@@ -1,11 +1,10 @@
-package query
+package main
 
 import (
 	"io"
 	"strings"
 
 	"github.com/PuerkitoBio/goquery"
-	"github.com/zshbunni/chgo/types"
 )
 
 func getLessonsWithSource(s string) (lessons string, source string) {
@@ -29,8 +28,8 @@ func getLessonsWithSource(s string) (lessons string, source string) {
 	return processed[0], processed[1]
 }
 
-func ExtractCourses(r io.Reader) ([]types.Course, error) {
-	var courses []types.Course
+func ExtractCourses(r io.Reader) ([]Course, error) {
+	var courses []Course
 
 	doc, err := goquery.NewDocumentFromReader(r)
 	if err != nil {
@@ -50,7 +49,7 @@ func ExtractCourses(r io.Reader) ([]types.Course, error) {
 		ls := s.Find(".course-lessons").Text()
 		lessons, source := getLessonsWithSource(ls)
 
-		courses = append(courses, types.Course{
+		courses = append(courses, Course{
 			Title:    title,
 			URL:      url,
 			Duration: duration,

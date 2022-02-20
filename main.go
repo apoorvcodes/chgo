@@ -1,196 +1,155 @@
 package main
 
 import (
-	"encoding/base64"
-	"encoding/json"
 	"flag"
 	"fmt"
-	"net/http"
-	"net/url"
 	"os"
-	"path/filepath"
-	"strings"
-	"time"
 
-	"github.com/zshbunni/chgo/query"
-	"github.com/zshbunni/chgo/types"
-	"gopkg.in/yaml.v2"
+	"github.com/charmbracelet/bubbles/spinner"
+	"github.com/charmbracelet/bubbles/textinput"
+	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 )
 
 var (
-	config   types.Config
-	helpText = "Failed to login. Try logging in."
-	baseURL  = "https://coursehunter.net"
+	config  Config
+	baseURL = "https://coursehunter.net"
 )
 
-// setConfig sets the config global object using the config file if present
-func setConfig() error {
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
-		return err
-	}
-
-	file := filepath.Join(homeDir, ".config", "chgo", "config.yaml")
-	data, err := os.ReadFile(file)
-	if err != nil {
-		return err
-	}
-
-	err = yaml.Unmarshal(data, &config)
-	return err
+type Loading struct {
+	text    string
+	status  bool
+	spinner spinner.Model
 }
 
-// isTokenExpires verifies whether the token in the config is expired or not
-func isTokenExpired() error {
-	tokens := strings.Split(config.AccessToken, ".")
-
-	if len(tokens) != 3 {
-		return fmt.Errorf("received malformed access token")
-	}
-
-	var token struct {
-		Exp int64 `json:"exp"`
-	}
-
-	jwt, err := base64.StdEncoding.DecodeString(tokens[1])
-	if err != nil {
-		return err
-	}
-
-	err = json.Unmarshal(jwt, &token)
-	if err != nil {
-		return err
-	}
-
-	now := time.Now().Unix()
-	if now > token.Exp {
-		return fmt.Errorf("token expired. try logging in")
-	}
-
-	return nil
+type model struct {
+	activeIdx   int
+	courses     []Course
+	searchInput textinput.Model
+	focussedIdx int
+	loading     Loading
+	err         error
 }
 
-// createConfig creats the config in `.config/chgo/config.yaml` location
-// if not present or overrides the previous config
-func createConfig(config types.Config) error {
-	data, err := yaml.Marshal(config)
-	if err != nil {
-		return err
+type coursesMsg []Course
+type errMsg error
+
+func fetchCourses(url string) tea.Cmd {
+	return func() tea.Msg {
+		courses, err := searchCourses(url)
+		if err != nil {
+			return errMsg(err)
+		}
+
+		return coursesMsg(courses)
 	}
-
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
-		return nil
-	}
-
-	configPath := filepath.Join(homeDir, ".config", "chgo")
-	err = os.MkdirAll(configPath, os.ModePerm)
-	if err != nil {
-		return nil
-	}
-
-	file, err := os.Create(filepath.Join(configPath, "config.yaml"))
-	if err != nil {
-		return nil
-	}
-	defer file.Close()
-
-	_, err = file.Write(data)
-
-	return err
 }
 
-// login logins using the email and password and updates the config file
-func login(email, password string) (types.Config, error) {
-	var config types.Config
+func (m model) Init() tea.Cmd {
+	return tea.Batch(tea.EnterAltScreen, m.loading.spinner.Tick)
+}
 
-	client := http.Client{
-		CheckRedirect: func(req *http.Request, via []*http.Request) error {
-			return http.ErrUseLastResponse
+func (m model) View() string {
+	appStyle := lipgloss.NewStyle().Padding(1)
+
+	if m.loading.status {
+		return appStyle.Render(m.loadingView())
+	}
+
+	list := m.coursesView()
+	return appStyle.Render(m.searchInput.View() + list + m.courseView())
+}
+
+func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch msg := msg.(type) {
+	case tea.KeyMsg:
+		switch msg.String() {
+		case "ctrl+c":
+			return m, tea.Quit
+		case "k", "up":
+			if m.activeIdx == 0 {
+				m.activeIdx = len(m.courses) - 1
+			} else {
+				m.activeIdx--
+			}
+		case "j", "down":
+			if m.activeIdx == len(m.courses)-1 {
+				m.activeIdx = 0
+			} else {
+				m.activeIdx++
+			}
+		case "enter":
+			if m.focussedIdx == 0 {
+				m.loading.text = "searching for course: " + m.searchInput.Value()
+				m.loading.status = true
+				m.activeIdx = 0
+				return m, fetchCourses(m.searchInput.Value())
+			}
+		case "tab":
+			next := m.focussedIdx + 1
+
+			if m.focussedIdx == 0 {
+				m.searchInput.Blur()
+			}
+
+			if m.focussedIdx == 1 {
+				m.searchInput.Focus()
+				next = 0
+			}
+
+			m.focussedIdx = next
+		}
+
+	case coursesMsg:
+		m.loading.status = false
+		m.courses = msg
+
+	case errMsg:
+		m.loading.status = false
+		return m, tea.Quit
+	}
+
+	var cmd tea.Cmd
+	m.searchInput, cmd = m.searchInput.Update(msg)
+	m.loading.spinner, cmd = m.loading.spinner.Update(msg)
+
+	return m, cmd
+}
+
+func NewModel() tea.Model {
+	i := textinput.New()
+	i.Placeholder = "search for courses"
+	i.Focus()
+
+	s := spinner.New()
+	s.Spinner = spinner.Dot
+	s.Style = lipgloss.NewStyle().Foreground(lipgloss.Color("205"))
+
+	return model{
+		searchInput: i,
+		loading: Loading{
+			status:  false,
+			text:    "",
+			spinner: s,
 		},
 	}
-
-	payload := url.Values{}
-	payload.Set("e_mail", email)
-	payload.Set("password", password)
-
-	req, err := http.NewRequest("POST", baseURL+"/sign-in", strings.NewReader(payload.Encode()))
-
-	if err != nil {
-		return config, err
-	}
-
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-
-	resp, err := client.Do(req)
-	if err != nil {
-		return config, nil
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != 302 {
-		return config, fmt.Errorf("Failed to login. Make sure you entered valid credentials.")
-	}
-
-	config.Locale = "en"
-	for _, cookie := range resp.Cookies() {
-		if cookie.Name == "user_ident" {
-			config.UserIdent = cookie.Value
-		}
-
-		if cookie.Name == "accessToken" {
-			config.AccessToken = cookie.Value
-		}
-	}
-
-	return config, nil
 }
 
-func prepareRequest(endpoint string) (*http.Request, error) {
-	req, err := http.NewRequest("GET", endpoint, nil)
-	if err != nil {
-		return nil, err
+func startTUI() {
+	if err := setConfig(); err != nil {
+		fmt.Println(`failed to login`)
+		return
 	}
 
-	req.AddCookie(&http.Cookie{
-		Name:  "accessToken",
-		Value: config.AccessToken,
-	})
-
-	req.AddCookie(&http.Cookie{
-		Name:  "user_ident",
-		Value: config.UserIdent,
-	})
-
-	req.AddCookie(&http.Cookie{
-		Name:  "locale",
-		Value: config.Locale,
-	})
-
-	return req, nil
-}
-
-func searchCourses(title string) ([]types.Course, error) {
-	var client http.Client
-
-	endpoint := baseURL + "/search?q=" + title
-	req, err := prepareRequest(endpoint)
-	if err != nil {
-		return nil, err
+	if err := isTokenExpired(); err != nil {
+		fmt.Println(`token expired`)
+		return
 	}
 
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, err
+	if err := tea.NewProgram(NewModel()).Start(); err != nil {
+		fmt.Printf("uh oh: %s", err)
+		os.Exit(1)
 	}
-	defer resp.Body.Close()
-
-	courses, err := query.ExtractCourses(resp.Body)
-	if err != nil {
-		return nil, err
-	}
-
-	return courses, nil
 }
 
 func main() {
@@ -198,56 +157,32 @@ func main() {
 	email := loginCmd.String("u", "", "email")
 	password := loginCmd.String("p", "", "password")
 
-	searchCmd := flag.NewFlagSet("search", flag.ExitOnError)
-	title := searchCmd.String("title", "", "course title")
+	if len(os.Args) > 1 {
+		switch os.Args[1] {
+		case "login":
+			loginCmd.Parse(os.Args[2:])
 
-	if len(os.Args) < 2 {
-		fmt.Println(`expected 'login' or 'search' subcommand`)
-		return
-	}
+			if len(*email) == 0 || len(*password) == 0 {
+				fmt.Println("missing credentials")
+				return
+			}
 
-	switch os.Args[1] {
-	case "login":
-		loginCmd.Parse(os.Args[2:])
+			config, err := login(*email, *password)
+			if err != nil {
+				fmt.Printf("failed to login: %s\n", err)
+				return
+			}
 
-		if len(*email) == 0 || len(*password) == 0 {
-			fmt.Println("Missing credentials")
-			return
+			err = createConfig(config)
+			if err != nil {
+				fmt.Printf("failed to create config: %s\n", err)
+			}
+
+			fmt.Println("Logged in")
+		default:
+			fmt.Println("expected subcommand 'login'")
 		}
-
-		c, err := login(*email, *password)
-		if err != nil {
-			fmt.Println(err)
-			return
-		}
-
-		err = createConfig(c)
-		if err != nil {
-			fmt.Println(err)
-			return
-		}
-
-		fmt.Println("Logged in")
-	case "search":
-		searchCmd.Parse(os.Args[2:])
-
-		if err := setConfig(); err != nil {
-			fmt.Println(err)
-			return
-		}
-
-		if err := isTokenExpired(); err != nil {
-			fmt.Println(err)
-			return
-		}
-
-		_, err := searchCourses(*title)
-		if err != nil {
-			fmt.Println(err)
-			return
-		}
-	default:
-		fmt.Println(`expected 'login' or 'search' subcommand`)
-		return
+	} else {
+		startTUI()
 	}
 }
