@@ -84,6 +84,8 @@ func (m model) View() string {
 }
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	var cmd tea.Cmd
+  
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		switch msg.String() {
@@ -105,8 +107,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.screenIdx = 0
 		case "enter":
 			currIdx := m.activeCourseIdx
-			m.activeCourseIdx = 0
-			m.loading.status = true
+
+      if m.screenIdx == 0 {
+        m.activeCourseIdx = 0
+        m.loading.status = true
+      }
 
 			if m.focussedIdx == 0 && m.screenIdx == 0 {
 				m.loading.text = "searching for course: " + m.searchInput.Value()
@@ -119,6 +124,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, fetchLessons(course.URL)
 			}
 
+      if m.screenIdx == 1 {
+        i := m.lessonsList.Index()
+        url := m.lessons[i].File
+        playLesson(url)
+      }
 		case "tab":
 			if m.screenIdx != 0 {
 				return m, nil
@@ -157,11 +167,15 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case errMsg:
 		m.loading.status = false
 		return m, tea.Quit
+
+  case spinner.TickMsg:
+    m.loading.spinner, cmd = m.loading.spinner.Update(msg)
+    return m, cmd
 	}
 
-	var cmd tea.Cmd
-	m.loading.spinner, cmd = m.loading.spinner.Update(msg)
-	m.searchInput, cmd = m.searchInput.Update(msg)
+  if m.screenIdx == 0 {
+    m.searchInput, cmd = m.searchInput.Update(msg)
+  }
 
 	if m.screenIdx == 1 {
 		m.lessonsList, cmd = m.lessonsList.Update(msg)

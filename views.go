@@ -11,14 +11,14 @@ import (
 
 var (
 	/* colors */
-	accentColor = lipgloss.Color("#E0AF68")
-	whiteColor  = lipgloss.Color("#FFFFFF")
-	pinkColor   = lipgloss.Color("#313552")
+	accentColor = lipgloss.Color("#78E2A0")
+	foregroundColor  = lipgloss.Color("#FFFFFF")
+	headerColor   = lipgloss.Color("#5840a7")
 
 	/* styles */
 	itemStyle         = lipgloss.NewStyle().PaddingLeft(2)
 	selectedItemStyle = lipgloss.NewStyle().PaddingLeft(2).Foreground(accentColor)
-	headerStyle       = lipgloss.NewStyle().Background(pinkColor).Foreground(whiteColor).Padding(0, 1)
+	headerStyle       = lipgloss.NewStyle().Background(headerColor).Foreground(foregroundColor).Padding(0, 1)
 )
 
 /* === lessonsView */

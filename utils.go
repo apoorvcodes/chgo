@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"os/exec"
 	"strings"
 	"time"
 )
@@ -36,4 +37,17 @@ func isTokenExpired() error {
 	}
 
 	return nil
+}
+
+// playLesson plays the selected lesson using `mpv`
+func playLesson(url string) {
+  player, err := exec.LookPath("mpv")
+
+  // TODO: notify the user about missing dependencies
+  if err != nil {
+    return
+  }
+
+  cmd := exec.Command(player, url)
+  cmd.Start()
 }

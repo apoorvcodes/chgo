@@ -26,7 +26,11 @@ func getLessonsWithSource(s string) (lessons string, source string) {
 		return
 	}
 
-	return processed[0], processed[1]
+  if len(processed) == 2 {
+    return processed[0], processed[1]
+  }
+
+  return
 }
 
 func ExtractCourses(r io.Reader) ([]Course, error) {
